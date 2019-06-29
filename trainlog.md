@@ -83,3 +83,9 @@ downbrown:0
 train cmd:
 python3  demo.py  --data-path  ./dataset  --dataset  duke  --model  resnet50
 python3  train.py  --data-path  ./dataset  --dataset  duke  --model  resnet50_softmax
+
+
+
+
+
+

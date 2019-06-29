@@ -46,6 +46,7 @@ def _softmax_loss(pred, gt,weight):
     #print(gt.size(0))
     #print(weight)
     weight = weight.repeat(gt.size(0),1)
+    #print(weight)
     pos_loss = torch.log(pred_) * torch.pow(1 - pred_, 2) * weight[label_inds]    
 
 
@@ -60,9 +61,9 @@ def _softmax_loss(pred, gt,weight):
 # ]
 
 class PersonAttr_Loss(nn.Module):
-    def __init__(self, pos_weight,class_value,class_name ):
+    def __init__(self, pos_dist,class_value,class_name ):
         super(PersonAttr_Loss, self).__init__()
-        self._weight = pos_weight
+        self._pos_dist = pos_dist #正样本分布
         self.class_value = class_value
         self.class_name = class_name
     def forward(self, outs, targets):
@@ -77,7 +78,7 @@ class PersonAttr_Loss(nn.Module):
                 out = _sigmoid(outs[idx])
                 gt  = targets[:,gt_base+idx]
                 #print("class 1" + str(gt_base+idx))
-                loss = loss + _clc_loss_mask(out,gt,self._weight[gt_base+idx])
+                loss = loss + _clc_loss_mask(out,gt,1 - self._pos_dist[gt_base+idx])
                 preds = torch.gt(out, torch.ones_like(out)/2 )
                 preds = preds.squeeze(1)
                 pred_success = pred_success + torch.sum(preds == gt.data.byte()).item()
@@ -87,7 +88,9 @@ class PersonAttr_Loss(nn.Module):
                 gt     = targets[:,gt_base+idx:gt_base+idx+self.class_value[idx]]
                 
                 #print("class " + str(class_value[idx]) + str(gt_base+idx) + "~" + str(gt_base+idx+5))
-                loss = loss + _softmax_loss(out,gt,self._weight[gt_base+idx:gt_base+idx+self.class_value[idx]])
+
+                weight = 1- self._pos_dist[gt_base+idx:gt_base+idx+self.class_value[idx]]
+                loss = loss + _softmax_loss(out,gt,weight)
 
                 gt_cls = torch.max(gt ,1)[1].data.byte()
                 output_cls = torch.max(out,1)[1].data.byte()
@@ -97,9 +100,18 @@ class PersonAttr_Loss(nn.Module):
             else:
                 out = outs[idx]
                 gt     = targets[:,gt_base+idx:gt_base+idx+self.class_value[idx]]
-                wieght = self._weight[gt_base+idx:gt_base+idx+self.class_value[idx]]
-
-                loss = loss + F.binary_cross_entropy_with_logits(out,gt)
+                weight = self._pos_dist[gt_base+idx:gt_base+idx+self.class_value[idx]]
+                #print(weight)
+                weights_label = torch.zeros(gt.shape)
+                for i in range(gt.shape[0]):
+                    for j in range(gt.shape[1]):
+                        if gt.data.cpu()[i, j] == 1:
+                            weights_label[i, j] = 1 - weight[j]
+                        else:
+                            weights_label[i, j] = weight[j]
+                weights_label = weights_label.cuda()
+                #print(weights_label)
+                loss = loss + F.binary_cross_entropy_with_logits(out,gt,weights_label)
                 # for subclass_id in range(0,self.class_value[idx]):
                 #     out_subclass = _sigmoid(out[:,subclass_id])
                     
@@ -112,5 +124,5 @@ class PersonAttr_Loss(nn.Module):
                 pred_success = pred_success + torch.sum(preds == gt.data.byte()).item() 
                 gt_base = gt_base + self.class_value[idx] - 1      
                 label_number += len(out[0])         
-        print(label_number)
+        #print(label_number)
         return loss.unsqueeze(0),pred_success/label_number

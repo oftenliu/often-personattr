@@ -147,8 +147,7 @@ if use_gpu:
 
 weights = torch.zeros(len(weight_pos))
 for i in range(0,len(weight_pos)):
-    weights[i] = 0.5
-print(weights)
+    weights[i] = weight_pos[i]
 weights = weights.cuda()
 
 criterion = PersonAttr_Loss(weights,config.class_value,config.class_name)
@@ -193,7 +192,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                 # get the inputs
                 #print(data)
                 images, labels = data
-                print(len(labels[0]))
+                #print(len(labels[0]))
                 # weights = torch.zeros(labels.shape)
                 # for i in range(labels.shape[0]):
                 #     for j in range(labels.shape[1]):
