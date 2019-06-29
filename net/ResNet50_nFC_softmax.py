@@ -25,14 +25,21 @@ def weights_init_classifier(m):
 
 
 
+
+# class_value = [1,5,1,1,1, 1, 1,1, 1,1, 1, 1,1,1, 1, 1, 1,1 ,1, 1, 1,1, 1, 1,1, 1,               
+#                1, 1,1, 1, 1, 1, 1,1, 1, 1, 1,1, 1, 1, 1,1, 1, 1, 1,1, 1, 1,1, 1, 1,
+#                1, 1, 1,1, 1, 1,1,
+# ]
+
 class ResNet50_nFC_softmax(nn.Module):
-    def __init__(self,class_num, upcolor_num,downcolor_num, **kwargs):
+    def __init__(self,class_value,class_name,**kwargs):
         super(ResNet50_nFC_softmax, self).__init__()
         self.model_name = 'resnet50_nfc_softmax'
-        self.class_num = class_num
-        self.upcolor_num = upcolor_num
-        self.downcolor_num = downcolor_num
-        
+        # self.class_num = class_num
+        # self.upcolor_num = upcolor_num
+        # self.downcolor_num = downcolor_num
+        self.class_value = class_value
+        self.class_name = class_name
         model_ft = models.resnet50(pretrained=True)
 
         # avg pooling to global pooling
@@ -42,25 +49,28 @@ class ResNet50_nFC_softmax(nn.Module):
         self.num_ftrs = 2048
         num_bottleneck = 512
         
-        for c in range(self.class_num):
-            if c == self.class_num - 1:
-                self.__setattr__('class_%d' % c,
-                nn.Sequential(nn.Linear(self.num_ftrs,num_bottleneck), 
-                              nn.BatchNorm1d(num_bottleneck),
-                              nn.LeakyReLU(0.1),
-                              nn.Dropout(p=0.5),
-                              nn.Linear(num_bottleneck, self.downcolor_num),
-                              nn.Softmax()))    
-            elif c == self.class_num - 2:
-                self.__setattr__('class_%d' % c,
-                nn.Sequential(nn.Linear(self.num_ftrs,num_bottleneck), 
-                              nn.BatchNorm1d(num_bottleneck),
-                              nn.LeakyReLU(0.1),
-                              nn.Dropout(p=0.5),
-                              nn.Linear(num_bottleneck, self.upcolor_num),
-                              nn.Softmax())) 
+        for c in  range(0,len(class_value)):
+            #print(self.class_name[c])
+            if class_value[c] != 1:
+                if c == 1:
+                    print(self.class_name[c])
+                    self.__setattr__('class_%s' % self.class_name[c],
+                    nn.Sequential(nn.Linear(self.num_ftrs,num_bottleneck), 
+                                nn.BatchNorm1d(num_bottleneck),
+                                nn.LeakyReLU(0.1),
+                                nn.Dropout(p=0.5),
+                                nn.Linear(num_bottleneck, class_value[c]),
+                                nn.Softmax()))    
+                else:
+                    print(self.class_name[c])
+                    self.__setattr__('class_%s' % self.class_name[c],
+                    nn.Sequential(nn.Linear(self.num_ftrs,num_bottleneck), 
+                                nn.BatchNorm1d(num_bottleneck),
+                                nn.LeakyReLU(0.1),
+                                nn.Dropout(p=0.5),
+                                nn.Linear(num_bottleneck, class_value[c])))                      
             else:
-                self.__setattr__('class_%d' % c,
+                self.__setattr__('class_%s' % self.class_name[c],
                 nn.Sequential(nn.Linear(self.num_ftrs,num_bottleneck), 
                               nn.BatchNorm1d(num_bottleneck),
                               nn.LeakyReLU(0.1),
@@ -70,7 +80,8 @@ class ResNet50_nFC_softmax(nn.Module):
     def forward(self, x):
         x = self.features(x)
         output = []
-        for c in range(self.class_num):
-            output.append(self.__getattr__('class_%d' % c)(x))
+        for c in range(0,len(self.class_value)):
+            output.append(self.__getattr__('class_%s' % self.class_name[c])(x))
         output.append(x)
+        #print(len(class_value),len(output))
         return output

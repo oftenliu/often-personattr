@@ -8,8 +8,10 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from datafolder.folder import Train_Dataset,Test_Dataset
+from datafolder.Rapdata import RapTrain_Dataset,RapTest_Dataset
 from net import *
 import torch.nn.functional as F
+import config
 ######################################################################
 # Settings
 # --------
@@ -17,7 +19,8 @@ use_gpu = True
 dataset_dict = {
     'market'  :  'market',
     'duke'  :  'duke',
-    'all':     'all'
+    'all':     'all',
+    'rap':     'rap',
 }
 model_dict = {
     'resnet18'  :  ResNet18_nFC,
@@ -45,7 +48,7 @@ assert args.model in model_dict.keys()
 
 data_dir = args.data_path
 #model_dir = os.path.join('./checkpoints', args.dataset, args.model)
-model_dir = os.path.join('./checkpoints', 'combine_backpack_bag', args.model)
+model_dir = os.path.join('./checkpoints', 'rap_multilabel_softmax_weight', args.model)
 
 if not os.path.isdir(model_dir):
     os.makedirs(model_dir)
@@ -91,11 +94,23 @@ def draw_curve(current_epoch):
 # DataLoader
 # ---------
 image_datasets = {}
-image_datasets['train'] = Train_Dataset(data_dir, dataset_name=dataset_dict[args.dataset],
-                                        train_val='train')
 
-image_datasets['test'] = Train_Dataset(data_dir, dataset_name=dataset_dict[args.dataset],
-                                      train_val='val')
+if args.dataset == 'rap':
+    image_datasets['train'] = RapTrain_Dataset(data_dir, dataset_name=dataset_dict[args.dataset],
+                                            train_val='train')
+
+    image_datasets['test'] = RapTrain_Dataset(data_dir, dataset_name=dataset_dict[args.dataset],
+                                        train_val='val')    
+else:
+    image_datasets['train'] = Train_Dataset(data_dir, dataset_name=dataset_dict[args.dataset],
+                                            train_val='train')
+
+    image_datasets['test'] = Train_Dataset(data_dir, dataset_name=dataset_dict[args.dataset],
+                                        train_val='val')
+
+
+
+
 dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=args.batch_size,
                                              shuffle=True, num_workers=args.num_workers)
               for x in ['train', 'test']}
@@ -108,13 +123,13 @@ weight_pos = image_datasets['train'].weight()
 num_id = image_datasets['train'].num_id()
 labels_list = image_datasets['train'].labels()
 
-print(weight_pos)
+print(dataset_sizes)
 ######################################################################
 # Model and Optimizer
 # ------------------
-model = model_dict[args.model](9,9,7)
-#save_path = os.path.join(model_dir,'net_59.pth')
-# save_path = os.path.join('./checkpoints/duke_finetune_bag/resnet50_softmax','net_19.pth')
+model = model_dict[args.model](config.class_value,config.class_name)
+# #save_path = os.path.join(model_dir,'net_59.pth')
+# save_path = os.path.join('./checkpoints/combine_backpack_bag/resnet50','net_69.pth')
 # model.load_state_dict(torch.load(save_path))
 
 # print(model)
@@ -132,11 +147,15 @@ if use_gpu:
 
 weights = torch.zeros(len(weight_pos))
 for i in range(0,len(weight_pos)):
-    weights[i] = weight_pos[i]
+    weights[i] = 0.5
 print(weights)
 weights = weights.cuda()
-criterion = PersonAttr_Loss(weights)
+
+criterion = PersonAttr_Loss(weights,config.class_value,config.class_name)
+#criterion = F.binary_cross_entropy_with_logits
 # optimizer
+print("class value " + str(len(config.class_value)))
+print("class name " + str(len(config.class_name)))
 optimizer = torch.optim.SGD(model.parameters(), lr = 0.01, momentum = 0.9,
                             weight_decay = 5e-4, nesterov = True,)
 
@@ -151,6 +170,7 @@ exp_lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 20, ga
 # ------------------
 def train_model(model, criterion, optimizer, scheduler, num_epochs):
     since = time.time()
+    os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -173,7 +193,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                 # get the inputs
                 #print(data)
                 images, labels = data
-                
+                print(len(labels[0]))
                 # weights = torch.zeros(labels.shape)
                 # for i in range(labels.shape[0]):
                 #     for j in range(labels.shape[1]):
@@ -199,44 +219,30 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                 # forward
                 outputs = model(images)
                 #print("class {} pred {},label {}".format(0,outputs[0],labels[:,0]))
+                #print(outputs.shape)
+                #print(labels.size())
 
-                label_loss = criterion(outputs, labels) #经过loss函数的计算　outputs的值已经被修改了
+                label_loss,pred_success = criterion(outputs, labels) #经过loss函数的计算　outputs的值已经被修改了
                 #print("class {} pred {},label {}".format(0,outputs[0],labels[:,0]))
                 # backward + optimize only if in training phase
                 if phase == 'train':
+                    #torch.autograd.set_detect_anomaly(True)
                     label_loss.backward()
                     optimizer.step()
-                pred_success = 0
-                bin_labels = 7
-                for c in range(bin_labels):
-                    
-                    preds = torch.gt(outputs[c], torch.ones_like(outputs[c])/2 ).data
-                    preds = preds.squeeze(1)
-                    pred_success = pred_success + torch.sum(preds == labels[:,c].data.byte()).item()
-                    
-                    #print("class {} pred_success is:{}".format(c,torch.sum(preds == labels[:,c].data.byte()).item()))
+
                 # statistics
-                upcolor_labels = labels[:,bin_labels:bin_labels+9]
-                downcolor_labels     = labels[:,bin_labels+9:bin_labels+16]
-
-                upcolor_labels = torch.max(upcolor_labels ,1)[1]
-                downcolor_labels = torch.max(downcolor_labels,1)[1] 
-
-                outputs_upcolor = torch.max(outputs[bin_labels+1],1)[1].data.byte()
-                outputs_downcolor = torch.max(outputs[bin_labels+2],1)[1].data.byte()
-
-                #print("outputs_upcolor pred_success is:{}".format(torch.sum(outputs_upcolor == upcolor_labels.data.byte()).item()))
-                #print("outputs_downcolor pred_success is:{}".format(torch.sum(outputs_downcolor == downcolor_labels.data.byte()).item()))
-                pred_success = pred_success + torch.sum(outputs_upcolor == upcolor_labels.data.byte()).item() 
-                pred_success = pred_success + torch.sum(outputs_downcolor == downcolor_labels.data.byte()).item()                                
                 running_loss += label_loss.item()
+                # if phase == 'test':
+                #     if label_loss > 10 :
+                #         print(weights)
+                #         print(labels)
+                #         print(outputs)
 
-                
-                running_corrects += pred_success / (10*args.batch_size )
+                running_corrects += pred_success
                 print('step : ({}/{})  |  loss : {:.4f}'.format(count*args.batch_size, dataset_sizes[phase], label_loss.item()))
 
             epoch_loss = running_loss / len(dataloaders[phase])
-            epoch_acc = running_corrects / len(dataloaders[phase])
+            epoch_acc = running_corrects / dataset_sizes[phase]
 
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
             y_loss[phase].append(epoch_loss)
